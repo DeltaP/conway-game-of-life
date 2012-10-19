@@ -1,0 +1,9 @@
+CGL
+
+Out/*
+Figures/*
+
+*.dSYM
+*.aux
+*.ps
+*.pgm

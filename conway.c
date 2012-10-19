@@ -43,7 +43,6 @@ void cleanup (int my_rank, const char *message) {
 // -----------------------------------------------------------------
 
 
-
 // -----------------------------------------------------------------
 // reads in file
 void fileread (char *filename, char *partition) {
@@ -87,7 +86,6 @@ void fileread (char *filename, char *partition) {
 
   local_width = width / ncols;                          /* determines the size of           */
   local_height = height / nrows;                        /* the local data                   */
-
   field_width = local_width + 2;                        /* creates an array with room for   */
   field_height = local_height + 2;                      /* ghosts and boarders              */
   // playing fields
@@ -95,7 +93,6 @@ void fileread (char *filename, char *partition) {
   field_b = (int *)malloc(field_width * field_height * sizeof(int));
   // array for the file read
   char *temp=(char *)malloc( local_width * local_height * sizeof(char));
-
   MPI_Aint extent;                                      /* declares the extent              */
   MPI_Datatype etype, filetype, contig;                 /* derrived data types for IO       */
   MPI_Offset disp = offset;                             /* the initial displacement of      */
@@ -134,7 +131,6 @@ void fileread (char *filename, char *partition) {
 // -----------------------------------------------------------------
 
 
-
 // -----------------------------------------------------------------
 // counts the number of bugs
 void measure (int iteration) {
@@ -155,9 +151,8 @@ void measure (int iteration) {
 // -----------------------------------------------------------------
 
 
-
 // -----------------------------------------------------------------
-// swaps ghost rows
+// swaps ghost rows --> looks messy is there a better way?
 void summonspectre(int iteration) {
   MPI_Datatype col;                                     /* makes col data type              */
   MPI_Type_vector(field_height, 1, field_width, MPI_INT, &col);
@@ -228,7 +223,6 @@ void summonspectre(int iteration) {
 // -----------------------------------------------------------------
 
 
-  
 // -----------------------------------------------------------------
 // the main program
 int main(int argc, char *argv[]) {
@@ -267,8 +261,8 @@ int main(int argc, char *argv[]) {
         int xb = x+1;                                   /*   is bigger due to ghost rows        */
         neighbor = 0;                                   /* initialize the neighbor count        */
         if (i%2 == 0) {                                 /* update field_a                       */
-          neighbor += field_a[(yb-1)*field_width+xb+1];
-          neighbor += field_a[(yb-1)*field_width+xb];
+          neighbor += field_a[(yb-1)*field_width+xb+1]; /* LOOK into using some type of pointer */
+          neighbor += field_a[(yb-1)*field_width+xb];   /*   to clean this up                   */
           neighbor += field_a[(yb-1)*field_width+xb-1];
           neighbor += field_a[(yb)*field_width+xb+1];
           neighbor += field_a[(yb)*field_width+xb-1];
