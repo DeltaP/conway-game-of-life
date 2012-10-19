@@ -23,6 +23,8 @@ int my_rank;
 // Local physical field size
 int field_width;        // Width and height of field on this processor
 int field_height;       // (should be local_width+2, local_height+2)
+int local_width;
+int local_height;
 int width;
 int height;
 int ncols;
@@ -98,7 +100,9 @@ bool fileread (char *filename, char *partition) {
   }
   else {
     // Create the array!
-    field_width = width + 2;
+    local_width  = width;
+    local_height = height;
+    field_width  = width  + 2;
     field_height = height + 2;
     field_a = (int *)malloc( field_width * field_height * sizeof(int));
     field_b = (int *)malloc( field_width * field_height * sizeof(int));
@@ -134,15 +138,15 @@ bool fileread (char *filename, char *partition) {
     return true;
   }
 
-/*  fclose(fp);
+  fclose(fp);
 
-  if( width % ncols ) {
-    if( my_rank==0 )
+  if (width % ncols) {
+    if (my_rank==0)
       printf( "Error: %i pixel width cannot be divided into %i cols\n", width, ncols );
     return false;
   }
-  if( height % nrows ) {
-    if( my_rank==0 )
+  if (height % nrows) {
+    if (my_rank==0)
       printf( "Error: %i pixel height cannot be divided into %i rows\n", height, nrows );
     return false;
   }
@@ -169,14 +173,13 @@ bool fileread (char *filename, char *partition) {
   MPI_Aint extent;
   MPI_Datatype etype, filetype, contig;
   
-  etype = MPI_INT;
-  MPI_Type_contiguous(nrows, etype, &contig);
+  etype = MPI_CHAR;
+  MPI_Type_contiguous(local_width, etype, &contig);
 
   MPI_Type_contiguous(2, etype, &contig); 
   extent = 6 * sizeof(int); 
   MPI_Type_create_resized(contig, 0, extent, &filetype); 
   MPI_Type_commit(&filetype); 
-*/
 
   return true;
 }
@@ -185,23 +188,21 @@ bool fileread (char *filename, char *partition) {
 
 
 // -----------------------------------------------------------------
-// the main program
+// counts the number of bugs
 void measure (int iteration) {
   int local_sum = 0;
   int global_sum = 0;
 
-  for (int j = 0; j < height; j++) {
-    for (int i = 0; i < width; i++) {
-      local_sum += (iteration%2==0) ? (field_a[(j+1)*(width+2)+(i+1)]) : (field_b[(j+1)*(width+2)+(i+1)]);
-      }
+  for (int j = 0; j < local_height; j++) {
+    for (int i = 0; i < local_width; i++) {
+      local_sum += (iteration%2==0) ? (field_a[(j+1)*(field_width)+(i+1)]) : (field_b[(j+1)*(field_width)+(i+1)]);
     }
   }
   
-
   if (nprocs > 1) {MPI_Reduce(&local_sum, &global_sum, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);}
   else {global_sum = local_sum;}
 
-  if (my_rank == 0) {printf("SUM for iteration %i = %i \n", iteration, global_sum);}
+  if (my_rank == 0) {printf("BUGCOUNT for iteration %i = %i \n", iteration, global_sum);}
 }
 // -----------------------------------------------------------------
 
@@ -236,48 +237,44 @@ int main(int argc, char *argv[]) {
 
   bool go_on = fileread(in_file, partition);
   if (go_on == false) {cleanup(my_rank, "Error:  fileread returned false, quitting program");}
-  int local_sum =0;
 
   for (int i = 0; i < iterations; i++) {
     if (i%interval == 0) {measure(i);}
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
+    for (int y = 0; y < local_height; y++) {
+      for (int x = 0; x < local_width; x++) {
+        int yb = y+1;
+        int xb = x+1; 
+        neighbor = 0;
         if (i%2 == 0) {
-          if (field_a[(y + 1 - 1) * width + (x + 1 + 1)]) {neighbor++;}
-          if (field_a[(y + 1 - 1) * width + (x + 1)])     {neighbor++;}
-          if (field_a[(y + 1 - 1) * width + (x + 1 - 1)]) {neighbor++;}
-          if (field_a[(y + 1) * width + (x + 1 + 1)])     {neighbor++;}
-          if (field_a[(y + 1) * width + (x + 1 - 1)])     {neighbor++;}
-          if (field_a[(y + 1 + 1) * width + (x + 1 + 1)]) {neighbor++;}
-          if (field_a[(y + 1 + 1) * width + (x + 1)])     {neighbor++;}
-          if (field_a[(y + 1 + 1) * width + (x + 1 - 1)]) {neighbor++;}
+          neighbor += field_a[(yb-1)*field_width+xb+1];
+          neighbor += field_a[(yb-1)*field_width+xb];
+          neighbor += field_a[(yb-1)*field_width+xb-1];
+          neighbor += field_a[(yb)*field_width+xb+1];
+          neighbor += field_a[(yb)*field_width+xb-1];
+          neighbor += field_a[(yb+1)*field_width+xb+1];
+          neighbor += field_a[(yb+1)*field_width+xb];
+          neighbor += field_a[(yb+1)*field_width+xb-1];
 
-          if (field_a[(y + 1) * width + (x + 1)]) {
-				    if ((neighbor < 2) || (neighbor > 3)) {field_b[(y + 1) * width + (x + 1)] = 0;}
-				    else {field_b[(y + 1) * width + (x + 1)] = field_a[(y + 1) * width + (x + 1)];}
-			  	}
-          else{ 
-		  		  if (neighbor == 3) {field_b[(y + 1) * width + (x + 1)] = 1;}
-		        else {field_b[(y + 1) * width + (x + 1)] = 0;}
+          field_b[yb*field_width+xb]=field_a[yb*field_width+xb];
+
+          if ((((neighbor < 2) || (neighbor > 3)) && (field_a[yb*field_width+xb])) || ((neighbor == 3) && (!field_a[yb*field_width+xb]))) {
+            field_b[yb*field_width+xb] ^= 1;
           }
         }
         else {
-          if (field_b[(y + 1 - 1) * width + (x + 1 + 1)]) {neighbor++;}
-          if (field_b[(y + 1 - 1) * width + (x + 1)])     {neighbor++;}
-          if (field_b[(y + 1 - 1) * width + (x + 1 - 1)]) {neighbor++;}
-          if (field_b[(y + 1) * width + (x + 1 + 1)])     {neighbor++;}
-          if (field_b[(y + 1) * width + (x + 1 - 1)])     {neighbor++;}
-          if (field_b[(y + 1 + 1) * width + (x + 1 + 1)]) {neighbor++;}
-          if (field_b[(y + 1 + 1) * width + (x + 1)])     {neighbor++;}
-          if (field_b[(y + 1 + 1) * width + (x + 1 - 1)]) {neighbor++;}
+          neighbor += field_b[(yb-1)*field_width+xb+1];
+          neighbor += field_b[(yb-1)*field_width+xb];
+          neighbor += field_b[(yb-1)*field_width+xb-1];
+          neighbor += field_b[(yb)*field_width+xb+1];
+          neighbor += field_b[(yb)*field_width+xb-1];
+          neighbor += field_b[(yb+1)*field_width+xb+1];
+          neighbor += field_b[(yb+1)*field_width+xb];
+          neighbor += field_b[(yb+1)*field_width+xb-1];
 
-          if (field_b[(y + 1) * width + (x + 1)]) {
-				    if ((neighbor < 2) || (neighbor > 3)) {field_a[(y + 1) * width + (x + 1)] = 0;}
-				    else {field_b[(y + 1) * width + (x + 1)] = field_a[(y + 1) * width + (x + 1)];}
-			  	}
-          else{ 
-		  		  if (neighbor == 3) {field_a[(y + 1) * width + (x + 1)] = 1;}
-		        else {field_a[(y + 1) * width + (x + 1)] = 0;}
+          field_a[yb*field_width+xb]=field_b[yb*field_width+xb];
+
+				  if ((((neighbor < 2) || (neighbor > 3)) && (field_b[yb*field_width+xb])) || ((neighbor == 3) && (!field_b[yb*field_width+xb]))) {
+            field_a[yb*field_width+xb] ^= 1;
           }
         }
       }     // x
