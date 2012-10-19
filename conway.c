@@ -192,13 +192,8 @@ void measure (int iteration) {
 
   for (int j = 0; j < height; j++) {
     for (int i = 0; i < width; i++) {
-      local_sum+=(iteration%2==0)?field_a[(j+1)*(width+2)+(i+1)]:field_b[(j+1)*(width+2)+(i+1)];
-     /* if (iteration%2 == 0) {
-        if (field_a[(j + 1) * width + (i + 1)]) {local_sum++;}
+      local_sum += (iteration%2==0) ? (field_a[(j+1)*(width+2)+(i+1)]) : (field_b[(j+1)*(width+2)+(i+1)]);
       }
-      else {
-        if (field_b[(j + 1) * width + (i + 1)]) {local_sum++;}
-      }*/
     }
   }
   
