@@ -27,8 +27,8 @@ int width;
 int height;
 int ncols;
 int nrows;
-int *field_a = NULL;      // The local data fields
-int *field_b = NULL;
+int *field_a;      // The local data fields
+int *field_b;
 // -----------------------------------------------------------------
 
 
@@ -97,12 +97,14 @@ bool fileread (char *filename, char *partition) {
     nrows = sqrt(nprocs);
   }
   else {
+    int k = 0;
     // Create the array!
     field_width = width + 2;
     field_height = height + 2;
     field_a = (int *)malloc( field_width * field_height * sizeof(int));
     field_b = (int *)malloc( field_width * field_height * sizeof(int));
-    int b, ll;
+    int b; 
+    int ll;
     for (int y = 0; y < field_height; y++ ) {
       for(int x = 0; x < field_width; x++ ) {
         if ((x == 0) || (y == 0) || (x == field_width - 1) || (y == field_height - 1)) {
@@ -112,15 +114,17 @@ bool fileread (char *filename, char *partition) {
         }
         else {
           // Read the next character
-          b = fgetc( fp );
+          b = (int)fgetc( fp );
           if( b == EOF ) {
             printf( "Error: Encountered EOF at [%i,%i]\n", y,x );
             return false;
           }
-  
+           
           // From the PGM, black cells (b=0) are bugs, all other 
           // cells are background 
-          b = (b>0)?1:0;
+          b = (b==0)?1:0;
+
+          k+=b;
           //if (b==0) {b=1;}
          // else {b=0;}
           ll = (y * field_width + x);
@@ -130,6 +134,17 @@ bool fileread (char *filename, char *partition) {
       }
     }
 
+int local_sum =0;
+ for (int j = 0; j < height; j++) {
+    for (int i = 0; i < width; i++) {
+      local_sum+=field_a[(j+1)*(width+2)+(i+1)];
+    }
+  }
+
+
+
+  //  measure(0);
+    printf("%i blah %i",k,local_sum);
     fclose(fp);
     return true;
   }
@@ -192,14 +207,17 @@ void measure (int iteration) {
 
   for (int j = 0; j < height; j++) {
     for (int i = 0; i < width; i++) {
-      if (iteration%2 == 0) {
+      local_sum+=(iteration%2==0)?field_a[(j+1)*(width+2)+(i+1)]:field_b[(j+1)*(width+2)+(i+1)];
+     /* if (iteration%2 == 0) {
         if (field_a[(j + 1) * width + (i + 1)]) {local_sum++;}
       }
       else {
         if (field_b[(j + 1) * width + (i + 1)]) {local_sum++;}
-      }
+      }*/
     }
   }
+  
+  //printf("%i",local_sum);
 
   if (nprocs > 1) {MPI_Reduce(&local_sum, &global_sum, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);}
   else {global_sum = local_sum;}
@@ -239,12 +257,18 @@ int main(int argc, char *argv[]) {
 
   bool go_on = fileread(in_file, partition);
   if (go_on == false) {cleanup(my_rank, "Error:  fileread returned false, quitting program");}
-
+ 
+  int local_sum =0;
+ for (int j = 0; j < height; j++) {
+    for (int i = 0; i < width; i++) {
+      local_sum+=field_a[(j+1)*(width+2)+(i+1)];
+    }
+  }
+  printf("%i\n",local_sum);
   for (int i = 0; i < iterations; i++) {
     if (i%interval == 0) {measure(i);}
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
-        neighbor = 0;
         /*
         if (i%2 == 0) {
           if (field_a[(y + 1 - 1) * width + (x + 1 + 1)]) {neighbor++;}
