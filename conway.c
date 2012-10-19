@@ -266,7 +266,7 @@ int main(int argc, char *argv[]) {
         int yb = y+1;                                   /* shifts needed becuase the            */
         int xb = x+1;                                   /*   is bigger due to ghost rows        */
         neighbor = 0;                                   /* initialize the neighbor count        */
-        if (i%2 == 0) {
+        if (i%2 == 0) {                                 /* update field_a                       */
           neighbor += field_a[(yb-1)*field_width+xb+1];
           neighbor += field_a[(yb-1)*field_width+xb];
           neighbor += field_a[(yb-1)*field_width+xb-1];
@@ -282,7 +282,7 @@ int main(int argc, char *argv[]) {
             field_b[yb*field_width+xb] ^= 1;
           }
         }
-        else {
+        else {                                          /* update field_b                       */
           neighbor += field_b[(yb-1)*field_width+xb+1];
           neighbor += field_b[(yb-1)*field_width+xb];
           neighbor += field_b[(yb-1)*field_width+xb-1];
@@ -298,9 +298,9 @@ int main(int argc, char *argv[]) {
             field_a[yb*field_width+xb] ^= 1;
           }
         }
-      }     // x
-    }       // y
-  }         // iteration
-  cleanup(my_rank, "Thank you for playing!");
+      }
+    }
+  }
+  cleanup(my_rank, "Thank you for playing!");         /* closes the program                     */
   return 0;
 }
