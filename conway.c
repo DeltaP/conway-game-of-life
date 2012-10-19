@@ -61,7 +61,7 @@ bool fileread (char *filename, char *partition) {
   //  |900 900           width height
   //  |255               depth
   char header[10];
-  int width, height, depth;
+  int  depth;
   int rv = fscanf( fp, "%6s\n%i %i\n%i\n", header, &width, &height, &depth );
   if( rv != 4 ) {
     if(my_rank==0) 
@@ -134,17 +134,19 @@ bool fileread (char *filename, char *partition) {
       }
     }
 
+  printf("%i\n",field_a);
+
 int local_sum =0;
  for (int j = 0; j < height; j++) {
     for (int i = 0; i < width; i++) {
-      local_sum+=field_a[(j+1)*(width+2)+(i+1)];
+      local_sum+=*(field_a+((j+1)*(width+2)+(i+1)));//field_a[(j+1)*(width+2)+(i+1)];
     }
   }
 
 
 
   //  measure(0);
-    printf("%i blah %i",k,local_sum);
+    printf("%i blah %i\n",k,local_sum);
     fclose(fp);
     return true;
   }
@@ -257,19 +259,22 @@ int main(int argc, char *argv[]) {
 
   bool go_on = fileread(in_file, partition);
   if (go_on == false) {cleanup(my_rank, "Error:  fileread returned false, quitting program");}
- 
+// printf("%i\n",field_a);  
   int local_sum =0;
+
+  //printf("%i %i",height,width);
  for (int j = 0; j < height; j++) {
     for (int i = 0; i < width; i++) {
-      local_sum+=field_a[(j+1)*(width+2)+(i+1)];
+      local_sum+=*(field_a+((j+1)*(width+2)+(i+1)));
     }
   }
-  printf("%i\n",local_sum);
+// printf("%i\n",field_a);
+  
+// printf("%i\n",local_sum);
   for (int i = 0; i < iterations; i++) {
     if (i%interval == 0) {measure(i);}
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
-        /*
         if (i%2 == 0) {
           if (field_a[(y + 1 - 1) * width + (x + 1 + 1)]) {neighbor++;}
           if (field_a[(y + 1 - 1) * width + (x + 1)])     {neighbor++;}
@@ -308,7 +313,6 @@ int main(int argc, char *argv[]) {
 		        else {field_a[(y + 1) * width + (x + 1)] = 0;}
           }
         }
-        */
       }     // x
     }       // y
   }         // iteration
