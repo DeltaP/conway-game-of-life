@@ -1,7 +1,7 @@
 /*
  * Gregory Petropoulos
  *
- * This is my ping pong program for assignment 4
+ * This is my Conway's Game of Life program for the midterm
  *
  * To compile:  mpicc -g -Wall -std=c99 -o CGL conway.c
  * To run:  mpiexec -n 1 ./CGL <input file name> <partition> <iteration> <interval>
@@ -17,19 +17,18 @@
 #include <stdbool.h>
 
 // -----------------------------------------------------------------
-// global variables
+// global variables --> perhaps make some of these local?
 int nprocs;
 int my_rank;
-// Local physical field size
-int field_width;        // Width and height of field on this processor
-int field_height;       // (should be local_width+2, local_height+2)
-int local_width;
+int field_width;                                        /* local board size                     */
+int field_height; 
+int local_width;                                        /* local size of data                   */
 int local_height;
-int width;
+int width;                                              /* The total dimension of the field     */
 int height;
 int ncols;
 int nrows;
-int *field_a;      // The local data fields
+int *field_a;                                           /* The local data fields                */
 int *field_b;
 // -----------------------------------------------------------------
 
@@ -47,15 +46,8 @@ void cleanup (int my_rank, const char *message) {
 
 // -----------------------------------------------------------------
 // reads in file
-bool fileread (char *filename, char *partition) {
-
-  
-
-  //
-  // Make sure that the width and height are divisible by the number of
-  // processors in x and y directions
-  //
-  if (strcmp(partition, "slice") == 0) {
+void fileread (char *filename, char *partition) {
+  if (strcmp(partition, "slice") == 0) {                /* determines the data decomposition    */
     ncols = 1;
     nrows = nprocs;
   }
@@ -68,13 +60,14 @@ bool fileread (char *filename, char *partition) {
     nrows = 1;
   }
 
-  MPI_File fh;
+  MPI_File fh;                                          /* sets up MPI input                  */
   MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDWR | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
   int offset =0;
   int newline_count = 0;
   char header[100];
   char read;
-  do {
+
+  do {                                                  /* reads in the header                */
     MPI_File_read_at_all(fh, offset, &read, 1, MPI_CHAR, MPI_STATUS_IGNORE);
     header[offset]=read;
     if (read == '\n') newline_count++;
@@ -82,95 +75,61 @@ bool fileread (char *filename, char *partition) {
     if (offset == 100) cleanup(my_rank, "Error:  Header exceeds 100 characters, check file or recompile code");
   } while (newline_count < 3);
     
-  char head[10];
-  int depth;
-  int rv = sscanf( header, "%6s\n%i %i\n%i\n", head, &width, &height, &depth );
-  if( rv != 4 ) {
-    if(my_rank==0) 
-      printf( "Error: The file '%s' did not have a valid PGM header\n", filename );
-      return false;
-  }
-  if( my_rank==0 ){
-    printf( "%s: %s %i %i %i\n", filename, head, width, height, depth );
-  }
-  // Make sure the header is valid
-  if( strcmp( head, "P5") ) {
-    if(my_rank==0) 
-      printf( "Error: PGM file is not a valid P5 pixmap.\n" );
-    return false;
-  }
-  if( depth != 255 )
-  {
-    if(my_rank==0) 
-      printf( "Error: PGM file has depth=%i, require depth=255 \n", depth );
-    return false;
-  }
+  char head[10];                                        /* parses the header and error      */
+  int depth;                                            /*   checks                         */
+  int rv =                sscanf(header, "%6s\n%i %i\n%i\n", head, &width, &height, &depth);
+  if (rv != 4)            cleanup(my_rank,"Error: The file did not have a valid PGM header");
+  if (my_rank==0)         printf( "%s: %s %i %i %i\n", filename, head, width, height, depth );
+  if (strcmp(head, "P5")) cleanup(my_rank,"Error: PGM file is not a valid P5 pixmap");
+  if( depth != 255 )      cleanup(my_rank,"Error: PGM file requires depth=255");
+  if (width % ncols)      cleanup(my_rank,"Error: pixel width cannot be divided evenly into cols");
+  if (height % nrows)     cleanup(my_rank,"Error: %i pixel height cannot be divided into %i rows\n");
 
+  local_width = width / ncols;                          /* determines the size of           */
+  local_height = height / nrows;                        /* the local data                   */
 
-
-  if (width % ncols) {
-    if (my_rank==0)
-      printf( "Error: %i pixel width cannot be divided into %i cols\n", width, ncols );
-    return false;
-  }
-  if (height % nrows) {
-    if (my_rank==0)
-      printf( "Error: %i pixel height cannot be divided into %i rows\n", height, nrows );
-    return false;
-  }
-
-  // Divide the total image among the local processors
-  local_width = width / ncols;
-  local_height = height / nrows;
-
-  // Create the array!
-  field_width = local_width + 2;
-  field_height = local_height + 2;
-  field_a = (int *)malloc( field_width * field_height * sizeof(int));
-  field_b = (int *)malloc( field_width * field_height * sizeof(int));
+  field_width = local_width + 2;                        /* creates an array with room for   */
+  field_height = local_height + 2;                      /* ghosts and boarders              */
+  // playing fields
+  field_a = (int *)malloc(field_width * field_height * sizeof(int));
+  field_b = (int *)malloc(field_width * field_height * sizeof(int));
+  // array for the file read
   char *temp=(char *)malloc( local_width * local_height * sizeof(char));
 
-  MPI_Aint extent;
-  MPI_Datatype etype, filetype, contig;
-  MPI_Offset disp = offset;
-
+  MPI_Aint extent;                                      /* declares the extent              */
+  MPI_Datatype etype, filetype, contig;                 /* derrived data types for IO       */
+  MPI_Offset disp = offset;                             /* the initial displacement of      */
+                                                        /*   the header                     */
+  // this needs to be added to the displacement so each processor starts reading from
+  // the right point of the file
   disp += (my_rank / ncols) * width * local_height + (my_rank % ncols) * local_width;
   
-  etype = MPI_CHAR;
-  MPI_Type_contiguous(local_width, etype, &contig); 
-  extent = width * sizeof(char); 
+  etype = MPI_CHAR;                                     /* sets the etype to MPI_CHAR       */
+  MPI_Type_contiguous(local_width, etype, &contig);     /*                                  */
+  extent = width * sizeof(char);                        /* total size of repeatable unit    */
   MPI_Type_create_resized(contig, 0, extent, &filetype); 
-  MPI_Type_commit(&filetype); 
+  MPI_Type_commit(&filetype);                           /* makes the filetype derrived data */
+  // reads in the file
   MPI_File_set_view(fh, disp, etype, filetype, "native", MPI_INFO_NULL);
   MPI_File_read_all(fh, temp, local_width*local_height, MPI_CHAR, MPI_STATUS_IGNORE);
 
-  int b; 
-  int ll;
- // int total = 0;
-  for (int y = 0; y < field_height; y++ ) {
+  int b, ll; 
+  for (int y = 0; y < field_height; y++ ) {             /* loops through the field          */
     for(int x = 0; x < field_width; x++ ) {
+      ll = (y * field_width + x);                       /* puts zeros at the boarders       */
       if ((x == 0) || (y == 0) || (x == field_width - 1) || (y == field_height - 1)) {
-        ll = (y * field_width + x);
         field_a[ll] = 0;
         field_b[ll] = 0;
       }
       else {
-        // Read the next character
-        b = (int)temp[x-1+(y-1)*local_width];
-        
-        // From the PGM, black cells (b=0) are bugs, all other 
-        // cells are background 
-        b = (b==0)?1:0;
-
-        ll = (y * field_width + x);
-        field_a[ ll ] = b;
-        field_b[ ll ] = b;
+        b = (int)temp[x-1+(y-1)*local_width];           /* finds data from read             */
+        b = (b==0)?1:0;                                 /* black = bugs; other = no bug     */
+        field_a[ll] = b;
+        field_b[ll] = b;
       }
     }
   }
-
   MPI_File_close(&fh);
-  return true;
 }
 // -----------------------------------------------------------------
 
@@ -198,76 +157,68 @@ void measure (int iteration) {
 
 
 // -----------------------------------------------------------------
-// counts the number of bugs
+// swaps ghost rows
 void summonspectre(int iteration) {
-  MPI_Datatype col;
+  MPI_Datatype col;                                     /* makes col data type              */
   MPI_Type_vector(field_height, 1, field_width, MPI_INT, &col);
   MPI_Type_commit(&col);
 
-  MPI_Datatype row;
+  MPI_Datatype row;                                     /* makes row data type              */
   MPI_Type_vector(field_width, 1, 1, MPI_INT, &row);
   MPI_Type_commit(&row);
 
-  int *pointer = (iteration%2==0)?field_a:field_b;
-
-  //send right odd
-  if ((my_rank%ncols)%2 == 1) {
+  int *pointer = (iteration%2==0)?field_a:field_b;      /* switches between field_a and     */
+                                                        /*   field_b                        */
+  if ((my_rank%ncols)%2 == 1) {                         /* send right odd                   */
     MPI_Recv(pointer, 1, col, my_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
-  else if (my_rank%ncols != ncols -1) {
+  else if (my_rank%ncols != ncols -1) {             
     MPI_Send((local_width+pointer), 1, col, my_rank + 1, 0, MPI_COMM_WORLD);
   }
 
-  //send left odd
-  if ((my_rank%ncols)%2 == 1) {
+  if ((my_rank%ncols)%2 == 1) {                         /* send left odd                    */
     MPI_Send((1+pointer), 1, col, my_rank-1, 0, MPI_COMM_WORLD);
   }
   else if (my_rank%ncols != ncols -1) {
     MPI_Recv((local_width+1+pointer), 1, col, my_rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 
-  //send right even
-  if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {
+  if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {   /* send right even                  */
     MPI_Recv(pointer, 1, col, my_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
   else if (my_rank%ncols != ncols -1 && (my_rank%ncols)%2==1) {
     MPI_Send((local_width+pointer), 1, col, my_rank + 1, 0, MPI_COMM_WORLD);
   }
 
-  //send left even
-  if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {
+  if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {   /* send left even                   */
     MPI_Send((1+pointer), 1, col, my_rank-1, 0, MPI_COMM_WORLD);
   }
   else if (my_rank%ncols != ncols -1 && (my_rank%ncols)%2==1) {
     MPI_Recv((local_width+1+pointer), 1, col, my_rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 
-  //send down odd
-  if ((my_rank/ncols)%2 == 1) {
+  if ((my_rank/ncols)%2 == 1) {                         /* send down odd                    */
     MPI_Recv(pointer, 1, row, my_rank - ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
   else if (my_rank/ncols != nrows -1) {
     MPI_Send((field_width*local_height+pointer), 1, row, my_rank + ncols, 0, MPI_COMM_WORLD);
   }
 
-  //send up odd
-  if ((my_rank/ncols)%2 == 1) {
+  if ((my_rank/ncols)%2 == 1) {                         /* send up odd                      */
     MPI_Send((field_width+pointer), 1, row, my_rank-ncols, 0, MPI_COMM_WORLD);
   }
   else if (my_rank/ncols != nrows -1) {
     MPI_Recv((field_width*(local_height+1)+pointer), 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 
-  //send down even
-  if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {
+  if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {   /* send down even                   */
     MPI_Recv(pointer, 1, row, my_rank - ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
   else if (my_rank/ncols != nrows -1 && (my_rank/ncols)%2==1) {
     MPI_Send((field_width*local_height+pointer), 1, row, my_rank + ncols, 0, MPI_COMM_WORLD);
   }
 
-  //send up even
-  if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {
+  if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {   /* send up even                     */
     MPI_Send((field_width+pointer), 1, row, my_rank-ncols, 0, MPI_COMM_WORLD);
   }
   else if (my_rank/ncols != nrows -1 && (my_rank/ncols)%2==1) {
@@ -281,7 +232,7 @@ void summonspectre(int iteration) {
 // -----------------------------------------------------------------
 // the main program
 int main(int argc, char *argv[]) {
-  char in_file[100];
+  char in_file[1000];
   char partition[100];
   int iterations, interval, neighbor;
 
@@ -289,7 +240,7 @@ int main(int argc, char *argv[]) {
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);               /* get the number of processes          */
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);              /* get my rank among all the processes  */
 
-  if (argc < 5) {
+  if (argc < 5) {                                       /* parses command line arguments        */
     cleanup(my_rank, "Error:  Too few arguments");
   }
   else if (argc == 5) {
@@ -305,17 +256,16 @@ int main(int argc, char *argv[]) {
     cleanup(my_rank, "Error:  Too many arguments");
   }
 
-  bool go_on = fileread(in_file, partition);
-  if (go_on == false) {cleanup(my_rank, "Error:  fileread returned false, quitting program");}
+  fileread(in_file, partition);                         /* function call to read the file in    */
 
   for (int i = 0; i < iterations; i++) {
-    summonspectre(i);
+    summonspectre(i);                                   /* exchanges ghost fields               */
     if (i%interval == 0) {measure(i);}
-    for (int y = 0; y < local_height; y++) {
+    for (int y = 0; y < local_height; y++) {            /* loops through the local data         */
       for (int x = 0; x < local_width; x++) {
-        int yb = y+1;
-        int xb = x+1; 
-        neighbor = 0;
+        int yb = y+1;                                   /* shifts needed becuase the            */
+        int xb = x+1;                                   /*   is bigger due to ghost rows        */
+        neighbor = 0;                                   /* initialize the neighbor count        */
         if (i%2 == 0) {
           neighbor += field_a[(yb-1)*field_width+xb+1];
           neighbor += field_a[(yb-1)*field_width+xb];
