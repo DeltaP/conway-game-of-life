@@ -49,42 +49,7 @@ void cleanup (int my_rank, const char *message) {
 // reads in file
 bool fileread (char *filename, char *partition) {
 
-  // Open the file
-  if( my_rank==0 )
-    printf( "Opening file %s\n", filename );
-  FILE *fp = fopen( filename, "r" );
-  if( !fp ) {
-    printf( "Error: The file '%s' could not be opened.\n", filename );
-    return false;
-  }
-
-  // Read the PGM header, which looks like this:
-  //  |P5                magic version number
-  //  |900 900           width height
-  //  |255               depth
-  char header[10];
-  int  depth;
-  int rv = fscanf( fp, "%6s\n%i %i\n%i\n", header, &width, &height, &depth );
-  if( rv != 4 ) {
-    if(my_rank==0) 
-      printf( "Error: The file '%s' did not have a valid PGM header\n", filename );
-      return false;
-  }
-  if( my_rank==0 ){
-    printf( "%s: %s %i %i %i\n", filename, header, width, height, depth );
-  }
-  // Make sure the header is valid
-  if( strcmp( header, "P5") ) {
-    if(my_rank==0) 
-      printf( "Error: PGM file is not a valid P5 pixmap.\n" );
-    return false;
-  }
-  if( depth != 255 )
-  {
-    if(my_rank==0) 
-      printf( "Error: PGM file has depth=%i, require depth=255 \n", depth );
-    return false;
-  }
+  
 
   //
   // Make sure that the width and height are divisible by the number of
@@ -99,46 +64,49 @@ bool fileread (char *filename, char *partition) {
     nrows = sqrt(nprocs);
   }
   else {
-    // Create the array!
-    local_width  = width;
-    local_height = height;
-    field_width  = width  + 2;
-    field_height = height + 2;
-    field_a = (int *)malloc( field_width * field_height * sizeof(int));
-    field_b = (int *)malloc( field_width * field_height * sizeof(int));
-    int b; 
-    int ll;
-    for (int y = 0; y < field_height; y++ ) {
-      for(int x = 0; x < field_width; x++ ) {
-        if ((x == 0) || (y == 0) || (x == field_width - 1) || (y == field_height - 1)) {
-          ll = (y * field_width + x);
-          field_a[ll] = 0;
-          field_b[ll] = 0;
-        }
-        else {
-          // Read the next character
-          b = (int)fgetc( fp );
-          if( b == EOF ) {
-            printf( "Error: Encountered EOF at [%i,%i]\n", y,x );
-            return false;
-          }
-           
-          // From the PGM, black cells (b=0) are bugs, all other 
-          // cells are background 
-          b = (b==0)?1:0;
-
-          ll = (y * field_width + x);
-          field_a[ ll ] = b;
-          field_b[ ll ] = b;
-        }
-      }
-    }
-
-    fclose(fp);
-    return true;
+    ncols = 1;
+    nrows = 1;
   }
 
-  fclose(fp);
+  MPI_File fh;
+  MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDWR | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
+  int offset =0;
+  int newline_count = 0;
+  char header[100];
+  char read;
+  do {
+    MPI_File_read_at_all(fh, offset, &read, 1, MPI_CHAR, MPI_STATUS_IGNORE);
+    header[offset]=read;
+    if (read == '\n') newline_count++;
+    offset++;
+    if (offset == 100) cleanup(my_rank, "Error:  Header exceeds 100 characters, check file or recompile code");
+  } while (newline_count < 3);
+    
+  char head[10];
+  int depth;
+  int rv = sscanf( header, "%6s\n%i %i\n%i\n", head, &width, &height, &depth );
+  if( rv != 4 ) {
+    if(my_rank==0) 
+      printf( "Error: The file '%s' did not have a valid PGM header\n", filename );
+      return false;
+  }
+  if( my_rank==0 ){
+    printf( "%s: %s %i %i %i\n", filename, head, width, height, depth );
+  }
+  // Make sure the header is valid
+  if( strcmp( head, "P5") ) {
+    if(my_rank==0) 
+      printf( "Error: PGM file is not a valid P5 pixmap.\n" );
+    return false;
+  }
+  if( depth != 255 )
+  {
+    if(my_rank==0) 
+      printf( "Error: PGM file has depth=%i, require depth=255 \n", depth );
+    return false;
+  }
+
+
 
   if (width % ncols) {
     if (my_rank==0)
@@ -162,25 +130,46 @@ bool fileread (char *filename, char *partition) {
   field_b = (int *)malloc( field_width * field_height * sizeof(int));
   char *temp=(char *)malloc( local_width * local_height * sizeof(char));
 
-
-	int i, j;
-	MPI_File	mpi_infile;
-  MPI_Status status;
-	int rc;
-  //int temp_size=local_row*local_col;
-  //char *temp=(char*)malloc(temp_size*sizeof(char));
-
   MPI_Aint extent;
   MPI_Datatype etype, filetype, contig;
+  MPI_Offset disp = offset;
+
+  disp += (my_rank / ncols) * width * local_height + (my_rank % ncols) * local_width;
   
   etype = MPI_CHAR;
-  MPI_Type_contiguous(local_width, etype, &contig);
-
-  MPI_Type_contiguous(2, etype, &contig); 
-  extent = 6 * sizeof(int); 
+  MPI_Type_contiguous(local_width, etype, &contig); 
+  extent = width * sizeof(char); 
   MPI_Type_create_resized(contig, 0, extent, &filetype); 
   MPI_Type_commit(&filetype); 
+  MPI_File_set_view(fh, disp, etype, filetype, "native", MPI_INFO_NULL);
+  MPI_File_read_all(fh, temp, local_width*local_height, MPI_CHAR, MPI_STATUS_IGNORE);
 
+  int b; 
+  int ll;
+ // int total = 0;
+  for (int y = 0; y < field_height; y++ ) {
+    for(int x = 0; x < field_width; x++ ) {
+      if ((x == 0) || (y == 0) || (x == field_width - 1) || (y == field_height - 1)) {
+        ll = (y * field_width + x);
+        field_a[ll] = 0;
+        field_b[ll] = 0;
+      }
+      else {
+        // Read the next character
+        b = (int)temp[x-1+(y-1)*local_width];
+        
+        // From the PGM, black cells (b=0) are bugs, all other 
+        // cells are background 
+        b = (b==0)?1:0;
+
+        ll = (y * field_width + x);
+        field_a[ ll ] = b;
+        field_b[ ll ] = b;
+      }
+    }
+  }
+
+  MPI_File_close(&fh);
   return true;
 }
 // -----------------------------------------------------------------
@@ -203,6 +192,87 @@ void measure (int iteration) {
   else {global_sum = local_sum;}
 
   if (my_rank == 0) {printf("BUGCOUNT for iteration %i = %i \n", iteration, global_sum);}
+}
+// -----------------------------------------------------------------
+
+
+
+// -----------------------------------------------------------------
+// counts the number of bugs
+void summonspectre(int iteration) {
+  MPI_Datatype col;
+  MPI_Type_vector(field_height, 1, field_width, MPI_INT, &col);
+  MPI_Type_commit(&col);
+
+  MPI_Datatype row;
+  MPI_Type_vector(field_width, 1, 1, MPI_INT, &row);
+  MPI_Type_commit(&row);
+
+  int *pointer = (iteration%2==0)?field_a:field_b;
+
+  //send right odd
+  if ((my_rank%ncols)%2 == 1) {
+    MPI_Recv(pointer, 1, col, my_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
+  else if (my_rank%ncols != ncols -1) {
+    MPI_Send((local_width+pointer), 1, col, my_rank + 1, 0, MPI_COMM_WORLD);
+  }
+
+  //send left odd
+  if ((my_rank%ncols)%2 == 1) {
+    MPI_Send((1+pointer), 1, col, my_rank-1, 0, MPI_COMM_WORLD);
+  }
+  else if (my_rank%ncols != ncols -1) {
+    MPI_Recv((local_width+1+pointer), 1, col, my_rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
+
+  //send right even
+  if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {
+    MPI_Recv(pointer, 1, col, my_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
+  else if (my_rank%ncols != ncols -1 && (my_rank%ncols)%2==1) {
+    MPI_Send((local_width+pointer), 1, col, my_rank + 1, 0, MPI_COMM_WORLD);
+  }
+
+  //send left even
+  if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {
+    MPI_Send((1+pointer), 1, col, my_rank-1, 0, MPI_COMM_WORLD);
+  }
+  else if (my_rank%ncols != ncols -1 && (my_rank%ncols)%2==1) {
+    MPI_Recv((local_width+1+pointer), 1, col, my_rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
+
+  //send down odd
+  if ((my_rank/ncols)%2 == 1) {
+    MPI_Recv(pointer, 1, row, my_rank - ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
+  else if (my_rank/ncols != nrows -1) {
+    MPI_Send((field_width*local_height+pointer), 1, row, my_rank + ncols, 0, MPI_COMM_WORLD);
+  }
+
+  //send up odd
+  if ((my_rank/ncols)%2 == 1) {
+    MPI_Send((field_width+pointer), 1, row, my_rank-ncols, 0, MPI_COMM_WORLD);
+  }
+  else if (my_rank/ncols != nrows -1) {
+    MPI_Recv((field_width*(local_height+1)+pointer), 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
+
+  //send down even
+  if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {
+    MPI_Recv(pointer, 1, row, my_rank - ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
+  else if (my_rank/ncols != nrows -1 && (my_rank/ncols)%2==1) {
+    MPI_Send((field_width*local_height+pointer), 1, row, my_rank + ncols, 0, MPI_COMM_WORLD);
+  }
+
+  //send up even
+  if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {
+    MPI_Send((field_width+pointer), 1, row, my_rank-ncols, 0, MPI_COMM_WORLD);
+  }
+  else if (my_rank/ncols != nrows -1 && (my_rank/ncols)%2==1) {
+    MPI_Recv((field_width*(local_height+1)+pointer), 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+  }
 }
 // -----------------------------------------------------------------
 
@@ -239,6 +309,7 @@ int main(int argc, char *argv[]) {
   if (go_on == false) {cleanup(my_rank, "Error:  fileread returned false, quitting program");}
 
   for (int i = 0; i < iterations; i++) {
+    summonspectre(i);
     if (i%interval == 0) {measure(i);}
     for (int y = 0; y < local_height; y++) {
       for (int x = 0; x < local_width; x++) {
