@@ -112,9 +112,9 @@ void fileread (char *filename, char *partition, int *offset) {
   MPI_File_set_view(fh, disp, etype, filetype, "native", MPI_INFO_NULL);
   MPI_File_read_all(fh, temp, local_width*local_height, MPI_CHAR, MPI_STATUS_IGNORE);
 
-  int b, ll; 
-  for (int y = 0; y < field_height; y++ ) {             /* loops through the field          */
-    for(int x = 0; x < field_width; x++ ) {
+  int x, y, b, ll; 
+  for (y = 0; y < field_height; y++ ) {             /* loops through the field          */
+    for(x = 0; x < field_width; x++ ) {
       ll = (y * field_width + x);                       /* puts zeros at the boarders       */
       if ((x == 0) || (y == 0) || (x == field_width - 1) || (y == field_height - 1)) {
         field_a[ll] = 0;
@@ -150,9 +150,9 @@ void filewrite (char *in_file, int iteration, int offset) {
   char *temp=(char *)malloc( local_width * local_height * sizeof(char));
   int *field_pointer = (iteration%2==0) ? (field_a) : (field_b);
 
-  int b, ll;
-  for (int y = 0; y < field_height; y++ ) {             /* loops through the field          */
-    for(int x = 0; x < field_width; x++ ) {
+  int x, y, b, ll;
+  for (y = 0; y < field_height; y++ ) {             /* loops through the field          */
+    for(x = 0; x < field_width; x++ ) {
       if ((x != 0) && (y != 0) && (x != field_width - 1) && (y != field_height - 1)) {
         ll = (y * field_width + x);                     /* puts zeros at the boarders       */
         b = field_pointer[ll];
@@ -188,11 +188,12 @@ void filewrite (char *in_file, int iteration, int offset) {
 void measure (int iteration) {
   int local_sum = 0;
   int global_sum = 0;
+  int i, j;
 
   int *pointer = (iteration%2 == 0) ? field_a : field_b;
 
-  for (int j = 0; j < local_height; j++) {
-    for (int i = 0; i < local_width; i++) {
+  for (j = 0; j < local_height; j++) {
+    for (i = 0; i < local_width; i++) {
       local_sum += pointer[(j+1)*(field_width)+(i+1)];
     }
   }
@@ -282,7 +283,7 @@ void summonspectre(int iteration) {
 int main(int argc, char *argv[]) {
   char in_file[1000];
   char partition[100];
-  int iterations, m_interval, w_interval, neighbor, offset;
+  int iterations, m_interval, w_interval, neighbor, offset, i, x, y;
 
   MPI_Init(&argc, &argv);                               /* start up MPI                         */
   MPE_Start_log();
@@ -329,7 +330,7 @@ int main(int argc, char *argv[]) {
   fileread(in_file, partition, &offset);                /* function call to read the file in    */
   MPE_Log_event(event1b, 0, "end Read");
 
-  for (int i = 0; i < iterations; i++) {
+  for (i = 0; i < iterations; i++) {
 
     MPE_Log_event(event2a, 0, "start Exchange Ghost Rows");
     summonspectre(i);                                   /* exchanges ghost fields               */
@@ -354,8 +355,8 @@ int main(int argc, char *argv[]) {
     int *pointer_old = (i%2==0)?field_a:field_b;        /* pointer to the field that is current */
     int *pointer_new = (i%2==0)?field_b:field_a;        /* pointer to the field that will update*/
 
-    for (int y = 0; y < local_height; y++) {            /* loops through the local data         */
-      for (int x = 0; x < local_width; x++) {
+    for (y = 0; y < local_height; y++) {            /* loops through the local data         */
+      for (x = 0; x < local_width; x++) {
         int yb = y+1;                                   /* shifts needed becuase the            */
         int xb = x+1;                                   /*   is bigger due to ghost rows        */
         neighbor = 0;                                   /* initialize the neighbor count        */
