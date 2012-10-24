@@ -3,7 +3,7 @@
  *
  * This is my Conway's Game of Life program for the midterm
  *
- * To compile:  mpicc -g -Wall -std=c99 -o CGL conway.c
+ * To compile:  mpicc -g -Wall -std=c99 -o CGL conway.c -lm -llmpe -lmpe
  * To run:  mpiexec -n 1 ./CGL <input file name> <partition> <iteration> <m_interval> <w_interval>
  *          <> -> mandatory
  *          [] -> optional
@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <mpi.h>
+#include <mpe.h>
 #include <string.h>
 #include <stdbool.h>
 
@@ -31,14 +32,14 @@ int nrows;
 int *field_a;                                           /* The local data fields                */
 int *field_b;
 char header[100];
-
 // -----------------------------------------------------------------
 
 
 // -----------------------------------------------------------------
 // Ends the program on an error and prints message to node 0
 void cleanup (int my_rank, const char *message) {
-  if (my_rank==0) {printf("%s\n",message);}
+  if (my_rank == 0) printf("%s\n",message);
+  MPE_Stop_log();
   MPI_Finalize();                                       /* kills mpi                            */
   exit(0);
 }
@@ -52,7 +53,7 @@ void fileread (char *filename, char *partition, int *offset) {
     ncols = 1;
     nrows = nprocs;
   }
-  else if (strcmp(partition, "checkerboard")==0) {
+  else if (strcmp(partition, "checkerboard") == 0) {
     ncols = sqrt(nprocs);
     nrows = sqrt(nprocs);
   }
@@ -174,7 +175,7 @@ void filewrite (char *in_file, int iteration, int offset) {
   extent = width * sizeof(char);                        /* total size of repeatable unit    */
   MPI_Type_create_resized(contig, 0, extent, &filetype); 
   MPI_Type_commit(&filetype);                           /* makes the filetype derrived data */
-  // reads in the file
+  // writes the file
   MPI_File_set_view(fh, disp, etype, filetype, "native", MPI_INFO_NULL);
   MPI_File_write_all(fh, temp, local_width*local_height, MPI_CHAR, MPI_STATUS_IGNORE);
   MPI_File_close(&fh);
@@ -188,7 +189,7 @@ void measure (int iteration) {
   int local_sum = 0;
   int global_sum = 0;
 
-  int *pointer = (iteration%2==0)?field_a:field_b;
+  int *pointer = (iteration%2 == 0) ? field_a : field_b;
 
   for (int j = 0; j < local_height; j++) {
     for (int i = 0; i < local_width; i++) {
@@ -196,10 +197,10 @@ void measure (int iteration) {
     }
   }
   
-  if (nprocs > 1) {MPI_Reduce(&local_sum, &global_sum, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);}
-  else {global_sum = local_sum;}
+  if (nprocs > 1) MPI_Reduce(&local_sum, &global_sum, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+  else global_sum = local_sum;
 
-  if (my_rank == 0) {printf("BUGCOUNT for iteration %i = %i \n", iteration, global_sum);}
+  if (my_rank == 0) printf("BUGCOUNT for iteration %i = %i \n", iteration, global_sum);
 }
 // -----------------------------------------------------------------
 
@@ -218,59 +219,59 @@ void summonspectre(int iteration) {
   int *pointer = (iteration%2==0)?field_a:field_b;      /* switches between field_a and     */
                                                         /*   field_b                        */
   if ((my_rank%ncols)%2 == 1) {                         /* send right odd                   */
-    MPI_Recv(pointer, 1, col, my_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(pointer                              , 1, col, my_rank - 1     , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
   else if (my_rank%ncols != ncols -1) {             
-    MPI_Send((local_width+pointer), 1, col, my_rank + 1, 0, MPI_COMM_WORLD);
+    MPI_Send(local_width+pointer                  , 1, col, my_rank + 1     , 0, MPI_COMM_WORLD);
   }
 
   if ((my_rank%ncols)%2 == 1) {                         /* send left odd                    */
-    MPI_Send((1+pointer), 1, col, my_rank-1, 0, MPI_COMM_WORLD);
+    MPI_Send(1+pointer                            , 1, col, my_rank-1       , 0, MPI_COMM_WORLD);
   }
   else if (my_rank%ncols != ncols -1) {
-    MPI_Recv((local_width+1+pointer), 1, col, my_rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(local_width+1+pointer                , 1, col, my_rank+1       , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 
   if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {   /* send right even                  */
-    MPI_Recv(pointer, 1, col, my_rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(pointer                              , 1, col, my_rank - 1     , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
   else if (my_rank%ncols != ncols -1 && (my_rank%ncols)%2==1) {
-    MPI_Send((local_width+pointer), 1, col, my_rank + 1, 0, MPI_COMM_WORLD);
+    MPI_Send(local_width+pointer                  , 1, col, my_rank + 1     , 0, MPI_COMM_WORLD);
   }
 
   if (my_rank%ncols != 0 && (my_rank%ncols)%2 == 0) {   /* send left even                   */
-    MPI_Send((1+pointer), 1, col, my_rank-1, 0, MPI_COMM_WORLD);
+    MPI_Send(1+pointer                            , 1, col, my_rank-1       , 0, MPI_COMM_WORLD);
   }
   else if (my_rank%ncols != ncols -1 && (my_rank%ncols)%2==1) {
-    MPI_Recv((local_width+1+pointer), 1, col, my_rank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(local_width+1+pointer                , 1, col, my_rank+1       , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 
   if ((my_rank/ncols)%2 == 1) {                         /* send down odd                    */
-    MPI_Recv(pointer, 1, row, my_rank - ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(pointer                              , 1, row, my_rank - ncols , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
   else if (my_rank/ncols != nrows -1) {
-    MPI_Send((field_width*local_height+pointer), 1, row, my_rank + ncols, 0, MPI_COMM_WORLD);
+    MPI_Send(field_width*local_height+pointer     , 1, row, my_rank + ncols , 0, MPI_COMM_WORLD);
   }
 
   if ((my_rank/ncols)%2 == 1) {                         /* send up odd                      */
-    MPI_Send((field_width+pointer), 1, row, my_rank-ncols, 0, MPI_COMM_WORLD);
+    MPI_Send(field_width+pointer                  , 1, row, my_rank-ncols   , 0, MPI_COMM_WORLD);
   }
   else if (my_rank/ncols != nrows -1) {
-    MPI_Recv((field_width*(local_height+1)+pointer), 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(field_width*(local_height+1)+pointer , 1, row, my_rank+ncols   , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 
   if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {   /* send down even                   */
-    MPI_Recv(pointer, 1, row, my_rank - ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(pointer                              , 1, row, my_rank - ncols , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
   else if (my_rank/ncols != nrows -1 && (my_rank/ncols)%2==1) {
-    MPI_Send((field_width*local_height+pointer), 1, row, my_rank + ncols, 0, MPI_COMM_WORLD);
+    MPI_Send(field_width*local_height+pointer     , 1, row, my_rank + ncols , 0, MPI_COMM_WORLD);
   }
 
   if (my_rank/ncols != 0 && (my_rank/ncols)%2 == 0) {   /* send up even                     */
-    MPI_Send((field_width+pointer), 1, row, my_rank-ncols, 0, MPI_COMM_WORLD);
+    MPI_Send(field_width+pointer                  , 1, row, my_rank-ncols   , 0, MPI_COMM_WORLD);
   }
   else if (my_rank/ncols != nrows -1 && (my_rank/ncols)%2==1) {
-    MPI_Recv((field_width*(local_height+1)+pointer), 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Recv(field_width*(local_height+1)+pointer , 1, row, my_rank+ncols   , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
   }
 }
 // -----------------------------------------------------------------
@@ -284,8 +285,28 @@ int main(int argc, char *argv[]) {
   int iterations, m_interval, w_interval, neighbor, offset;
 
   MPI_Init(&argc, &argv);                               /* start up MPI                         */
+  MPE_Start_log();
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);               /* get the number of processes          */
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);              /* get my rank among all the processes  */
+
+  int event1a = MPE_Log_get_event_number();             /* creates events that are profiled     */
+  int event1b = MPE_Log_get_event_number();
+  int event2a = MPE_Log_get_event_number();
+  int event2b = MPE_Log_get_event_number();
+  int event3a = MPE_Log_get_event_number();
+  int event3b = MPE_Log_get_event_number();
+  int event4a = MPE_Log_get_event_number();
+  int event4b = MPE_Log_get_event_number();
+  int event5a = MPE_Log_get_event_number();
+  int event5b = MPE_Log_get_event_number();
+
+  if (my_rank == 0) {                                   /* gives descriptions to profiled events*/
+    MPE_Describe_state(event1a, event1b, "Load File", "gray");
+    MPE_Describe_state(event2a, event2b, "Exchange Ghost Rows", "green");
+    MPE_Describe_state(event3a, event3b, "Measure", "red");
+    MPE_Describe_state(event4a, event4b, "Write", "yellow");
+    MPE_Describe_state(event5a, event5b, "Update", "blue");
+  }
 
   if (argc < 6) {                                       /* parses command line arguments        */
     cleanup(my_rank, "Error:  Too few arguments");
@@ -304,17 +325,32 @@ int main(int argc, char *argv[]) {
     cleanup(my_rank, "Error:  Too many arguments");
   }
 
+  MPE_Log_event(event1a, 0, "start Read");
   fileread(in_file, partition, &offset);                /* function call to read the file in    */
+  MPE_Log_event(event1b, 0, "end Read");
 
   for (int i = 0; i < iterations; i++) {
+
+    MPE_Log_event(event2a, 0, "start Exchange Ghost Rows");
     summonspectre(i);                                   /* exchanges ghost fields               */
+    MPE_Log_event(event2b, 0, "end Exchange Ghost Rows");
+
     if (m_interval > 0) {
-      if (i%m_interval == 0) {measure(i);}
+      if (i%m_interval == 0) {
+        MPE_Log_event(event3a, 0, "start Measure");
+        measure(i);
+        MPE_Log_event(event3b, 0, "end Measure");
+      }
     }
     if (w_interval > 0) {
-      if (i%w_interval == 0) {filewrite(in_file, i, offset);}
+      if (i%w_interval == 0) {
+        MPE_Log_event(event4a, 0, "start Write");
+        filewrite(in_file, i, offset);
+        MPE_Log_event(event4b, 0, "end Write");
+      }
     }
 
+    MPE_Log_event(event5a, 0, "start Update");
     int *pointer_old = (i%2==0)?field_a:field_b;        /* pointer to the field that is current */
     int *pointer_new = (i%2==0)?field_b:field_a;        /* pointer to the field that will update*/
 
@@ -339,6 +375,7 @@ int main(int argc, char *argv[]) {
         }
       }
     }
+    MPE_Log_event(event5b, 0, "end Update");
   }
   cleanup(my_rank, "Thank you for playing!");         /* closes the program                     */
   return 0;
