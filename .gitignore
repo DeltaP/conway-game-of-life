@@ -9,6 +9,8 @@ Log/*
 *.ps
 *.pgm
 *.o
+*.gif
 
 Clog/*
 cgl
+Saved_States

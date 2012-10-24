@@ -2,14 +2,17 @@
 \usepackage{graphicx}
 \usepackage{caption}
 \usepackage{subcaption}
+\usepackage{color}
+\usepackage[usenames,dvipsnames]{xcolor}
 
 \begin{document}
 \title{HPSC Assignment 4}
 \author{Gregory Petropoulos}
-\date{October 17, 2012}
+\date{October 24, 2012}
 \maketitle
 
-\section{Implementation}
+\section{Part I}
+\subsection{Implementation}
 To implement Conway's game of life I gave each process two one dimensional array, field\_a and field\_b. 
 I navigated through these arrays using offests.  
 This array had the data decomposition mandated by the users choice of partition, checkerboard or slice, as well as a perimiter.  
@@ -38,7 +41,7 @@ Finally my program handles all the errors I have encountered grancefully.
 If the user does not want to run measurmetns they can enter an argument of zero.
 Simply entering an argument larger than the number of iterations will result in the read in file being measured.
 
-\section{Code}
+\subsection{Code}
 To teset the code I ran the required tests from the assignment sheet shown in table \ref{runs}.
 Each test ran sucesfully and generated the same output.  
 The output is attached to this report.
@@ -59,4 +62,106 @@ The output is attached to this report.
   \caption{`run' indicates which tests were ran.}
   \label{runs}
 \end{table}
+
+\section{Part II}
+\subsection{MPI-IO}
+To write my .pgm files I used a similar method as I did reading the files in.  
+I defined an etype and then created derived data types to tell the program what the spacing in the file that it will use for output.
+Determining where each process wrote is a function of the overall header length, the number of processes, and the way the data was partitioned.
+Once I had the correct offsets and the derived data types established I used file view to tell each core where in the file to write and then wrote the file
+Below is my code that was used to create the MPI derived data type, set the offset and write the file.
+\\\\
+\noindent\texttt{MPI\_File fh;                                          } \\
+\texttt{MPI\_File\_open(MPI\_COMM\_WORLD, filename, MPI\_MODE\_RDWR | MPI\_MODE\_CREATE, MPI\_INFO\_NULL, \&fh);}\\
+\texttt{char *temp=(char *)malloc( local\_width * local\_height * sizeof(char));}\\
+\texttt{MPI\_Aint extent;                                      }\\
+\texttt{MPI\_Datatype etype, filetype, contig;                 }\\
+\texttt{MPI\_Offset disp = offset;                             }\\
+\texttt{disp += (my\_rank / ncols) * width * local\_height + (my\_rank \% ncols) * local\_width;}\\
+\texttt{etype = MPI\_CHAR;                                     }\\
+\texttt{MPI\_Type\_contiguous(local\_width, etype, \&contig);  }\\
+\texttt{extent = width * sizeof(char);                         }\\
+\texttt{MPI\_Type\_create\_resized(contig, 0, extent, \&filetype);}\\
+\texttt{MPI\_Type\_commit(\&filetype);                         }\\
+\texttt{MPI\_File\_set\_view(fh, disp, etype, filetype, "native", MPI\_INFO\_NULL);}\\
+\texttt{MPI\_File\_write\_all(fh, temp, local\_width*local\_height, MPI\_CHAR, MPI\_STATUS\_IGNORE);}\\
+\texttt{MPI\_File\_close(\&fh);}
+\\\\
+To generate the animation I started form the provided file conway-900x900.pgm and iterated it 20 steps saving every update step.  
+In a separate run I saved every 100 configurations for 1000 update steps.
+The animation I produced is a combination of these two runs, thus it captures how the image dissolves with high resolution and gives a glimpse at what happens after a large number of updates.
+The 31 saved output files were the turned into a gif using the command \texttt{convert -delay 20 -loop 0 file1.pgm file2.pgm file3.pgm animate.gif} where I replaced the files with the appropriate names.
+Using this method I did not experience any difficulties creating the animation.
+
+
+
+\subsection{MPE Profiling}
+To do my profiling I profiled function calls to read the file and set up the board, write a file, count bugs, and communicate the boundary.
+I also profiled the in-line chunk of code responsible for updating the playing field.
+Reading and set up are combined in my profiling because they are in the same function call and I didn't want to clutter the code too much.
+This is the best logical partitioning of profiling for this code because it encompasses everything that is done and is not too cluttered.
+
+\begin{figure}[htpb]
+  \centering
+  \includegraphics[width=4in]{Figures/gnatt_1_core.png}
+  \caption{The jumpshot graph for Conway's game of life with one core.  This is zoomed to where the file has been read and the program is updating.}
+  \label{fig:onecore}
+\end{figure}
+
+For all profiling plots {\color{gray} gray} is {\color{gray} fileread}, {\color{green} green} is the {\color{green}communication of ghost rows}, {\color{blue} blue} is the {\color{blue} update}, {\color{red} red} is the {\color{red} measurement}, and {\color{yellow}yellow} is the {\color{yellow} write}.  All of these charts show 10 update steps with a measurement every other step and a write in the beginning and end.
+
+\begin{figure}[htpb]
+  \centering
+  \begin{subfigure}[b]{0.5\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{Figures/gnatt_checkerboard_1.png}
+    \caption{A view of all the processes}
+    \label{fig:check1}
+  \end{subfigure}%
+  \begin{subfigure}[b]{0.5\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{Figures/gnatt_checkerboard_2.png}
+    \caption{Zoomed into post read in.}
+    \label{fig:check2}
+  \end{subfigure}
+  \begin{subfigure}[b]{0.5\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{Figures/gnatt_checkerboard_3.png}
+    \caption{Communication, update, and measurement}
+    \label{fig:check3}
+  \end{subfigure}%
+  \caption{For the checkerboard partitioning figure \ref{fig:check1} shows that everything is very synchronous.  Figure \ref{fig:check2} shows a zoom in immediately after the file is read in where ghost rows are communicated and the first bug count is performed.  Figure \ref{fig:check3} demonstrates how synchronous the communication and update steps are among the different processes.}\label{fig:checkerboard}
+\end{figure}
+
+\begin{figure}[htpb]
+  \centering
+  \begin{subfigure}[b]{0.5\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{Figures/gnatt_slice_1.png}
+    \caption{A view of all the processes.}
+    \label{fig:slice1}
+  \end{subfigure}%
+  \begin{subfigure}[b]{0.5\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{Figures/gnatt_slice_2.png}
+    \caption{The update itself is synchronous.}
+    \label{fig:slice2}
+  \end{subfigure}
+  \caption{For the slice partition figure \ref{fig:slice1} shows that the processes are not as well synchronized as they were in the checkerboard case.  In particular the file writes are much more asynchronous.  Figure \ref{fig:slice2} shows that the update is still very synchronous which is desirable.}\label{fig:slice}
+\end{figure}
+
+My profiling results show that most of the programs time is spent reading and writing the configurations.  
+This does not come as a great surprise.  
+What did surprise me is how much better the checkerboard partition performed than the slice partition.  
+My only explanation for this behavior is that the checkerboard communication pattern sends more smaller messages than the slice communication pattern.
+The checkerboard partition quickly fell into a synchronous pattern and took less time to complete.  
+The slice partition was less synchronous and took a longer time to complete because processes were often waiting for one another.
+The main source of the slice partitions disadvantage seems to be in writing configurations to disk.
+This could be because each process is writing to a single location of disk where the checkerboard breaks things up more and allows each process to write more than one place in disk at at time.
+This is purely speculation.
+It is worth noting that the order of overall timings were fastest to slowest checkerboard, single core, slice.
+A barrier to massive parallelization is if the communication time takes as about as long as the update time. 
+This can occur if to small of a local volume is used and eats away at the gains from going to more cores.
+It is only desirable to split the problem on more cores if the communication time is shorter than the update time.
+My main goal at this point is to find out what is ailing my slice partition and see if I can get any speed gains from the program as a whole.
 \end{document}
