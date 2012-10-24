@@ -1,0 +1,62 @@
+\documentclass[11pt,a4paper,oneside]{report}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\begin{document}
+\title{HPSC Assignment 4}
+\author{Gregory Petropoulos}
+\date{October 17, 2012}
+\maketitle
+
+\section{Implementation}
+To implement Conway's game of life I gave each process two one dimensional array, field\_a and field\_b. 
+I navigated through these arrays using offests.  
+This array had the data decomposition mandated by the users choice of partition, checkerboard or slice, as well as a perimiter.  
+This amounted to declaring array sizes with heights and widths that were two spaces bigger than the local heigh and local width of the relevant data from the file. 
+Empty enteries were filled as follows:  any edge of the board was filled with zeros and any border shared with another process was filled with the appropriate ghost data from its neighbor(s).  
+This method of filling made communication to update the ghosts easy and made the update method universal for looping over the interior data.  
+To communicate the ghost rows I used point to point communication between pairs of processors.  
+I arraganged this communication so that half of the processors would send first and the other half would recieve first; as a result my code does not rely on MPI buffering.
+For the ghost rows to communicate correctly for a general slice data decomposition and a general checkerboard data decomposition I used a series of if conditions involving the processor number, the size of the board, and the number of rows and columns in the global partitioning scheme.  
+Additionally, I used two stage forwarding to share ghost columns and then ghost rows avoiding the need to communicate diagnoals seperately.  
+
+To avoid executing large memory copies regularly I alternate between using field\_a and field\_b as follows:
+
+\begin{enumerate}
+  \item use field\_a to update field\_b
+  \item communicate field\_b ghosts
+  \item use field\_b to update field\_a
+  \item communicate field\_a ghosts
+  \item use field\_a to update field\_b
+  \item \dots
+\end{enumerate}
+
+Thus the iteration number being odd or even has consequences for which array I perform my ghost update and perform bug counts.  
+I handle this by passing the iteration number to these subroutines and using a tertiary operator on the mod of the iteration number to choose which field is the relevant one.
+Finally my program handles all the errors I have encountered grancefully.
+If the user does not want to run measurmetns they can enter an argument of zero.
+Simply entering an argument larger than the number of iterations will result in the read in file being measured.
+
+\section{Code}
+To teset the code I ran the required tests from the assignment sheet shown in table \ref{runs}.
+Each test ran sucesfully and generated the same output.  
+The output is attached to this report.
+\begin{table}
+  \centering
+  \begin{tabular}{|c|c|c|c|}
+    \hline
+    Nodes & Serial & Slice & Checkerboard \\
+    \hline
+        1 & run & & \\
+        4 & & run & run \\
+        9 & & run & run \\
+       16 & & & run \\
+       25 & & run & run \\
+       36 & & run & run \\
+    \hline
+  \end{tabular}
+  \caption{`run' indicates which tests were ran.}
+  \label{runs}
+\end{table}
+\end{document}

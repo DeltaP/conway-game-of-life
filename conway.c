@@ -4,7 +4,7 @@
  * This is my Conway's Game of Life program for the midterm
  *
  * To compile:  mpicc -g -Wall -std=c99 -o CGL conway.c
- * To run:  mpiexec -n 1 ./CGL <input file name> <partition> <iteration> <interval>
+ * To run:  mpiexec -n 1 ./CGL <input file name> <partition> <iteration> <m_interval> <w_interval>
  *          <> -> mandatory
  *          [] -> optional
  */
@@ -30,6 +30,8 @@ int ncols;
 int nrows;
 int *field_a;                                           /* The local data fields                */
 int *field_b;
+char header[100];
+
 // -----------------------------------------------------------------
 
 
@@ -45,7 +47,7 @@ void cleanup (int my_rank, const char *message) {
 
 // -----------------------------------------------------------------
 // reads in file
-void fileread (char *filename, char *partition) {
+void fileread (char *filename, char *partition, int *offset) {
   if (strcmp(partition, "slice") == 0) {                /* determines the data decomposition    */
     ncols = 1;
     nrows = nprocs;
@@ -61,22 +63,21 @@ void fileread (char *filename, char *partition) {
 
   MPI_File fh;                                          /* sets up MPI input                  */
   MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDWR | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
-  int offset =0;
   int newline_count = 0;
-  char header[100];
   char read;
+  *offset = 0;
 
   do {                                                  /* reads in the header                */
-    MPI_File_read_at_all(fh, offset, &read, 1, MPI_CHAR, MPI_STATUS_IGNORE);
-    header[offset]=read;
+    MPI_File_read_at_all(fh, *offset, &read, 1, MPI_CHAR, MPI_STATUS_IGNORE);
+    header[*offset]=read;
     if (read == '\n') newline_count++;
-    offset++;
-    if (offset == 100) cleanup(my_rank, "Error:  Header exceeds 100 characters, check file or recompile code");
+    (*offset)++;
+    if (*offset == 100) cleanup(my_rank, "Error:  Header exceeds 100 characters, check file or recompile code");
   } while (newline_count < 3);
     
   char head[10];                                        /* parses the header and error      */
   int depth;                                            /*   checks                         */
-  int rv =                sscanf(header, "%6s\n%i %i\n%i\n", head, &width, &height, &depth);
+  int rv               =  sscanf(header, "%6s\n%i %i\n%i\n", head, &width, &height, &depth);
   if (rv != 4)            cleanup(my_rank,"Error: The file did not have a valid PGM header");
   if (my_rank==0)         printf( "%s: %s %i %i %i\n", filename, head, width, height, depth );
   if (strcmp(head, "P5")) cleanup(my_rank,"Error: PGM file is not a valid P5 pixmap");
@@ -95,7 +96,7 @@ void fileread (char *filename, char *partition) {
   char *temp=(char *)malloc( local_width * local_height * sizeof(char));
   MPI_Aint extent;                                      /* declares the extent              */
   MPI_Datatype etype, filetype, contig;                 /* derrived data types for IO       */
-  MPI_Offset disp = offset;                             /* the initial displacement of      */
+  MPI_Offset disp = *offset;                            /* the initial displacement of      */
                                                         /*   the header                     */
   // this needs to be added to the displacement so each processor starts reading from
   // the right point of the file
@@ -132,14 +133,66 @@ void fileread (char *filename, char *partition) {
 
 
 // -----------------------------------------------------------------
+// writes the game board out to file
+void filewrite (char *in_file, int iteration, int offset) {
+  char filename[1000];
+  sprintf(filename, "%d_", iteration); 
+  strcat(filename, in_file);
+
+  MPI_File fh;                                          /* sets up MPI input                */
+  MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_RDWR | MPI_MODE_CREATE, MPI_INFO_NULL, &fh);
+
+  if (my_rank == 0) {      /* writes the header                */
+    MPI_File_write(fh,header,offset,MPI_CHAR,MPI_STATUS_IGNORE); 
+  }
+
+  char *temp=(char *)malloc( local_width * local_height * sizeof(char));
+  int *field_pointer = (iteration%2==0) ? (field_a) : (field_b);
+
+  int b, ll;
+  for (int y = 0; y < field_height; y++ ) {             /* loops through the field          */
+    for(int x = 0; x < field_width; x++ ) {
+      if ((x != 0) && (y != 0) && (x != field_width - 1) && (y != field_height - 1)) {
+        ll = (y * field_width + x);                     /* puts zeros at the boarders       */
+        b = field_pointer[ll];
+        b = (b==0)?0xFF:0;                              /* black = bugs; other = no bug     */
+        temp[x-1+(y-1)*local_width] = (char)b;
+      }
+    }
+  }
+
+  MPI_Aint extent;                                      /* declares the extent              */
+  MPI_Datatype etype, filetype, contig;                 /* derrived data types for IO       */
+  MPI_Offset disp = offset;                             /* the initial displacement of      */
+
+  // this needs to be added to the displacement so each processor starts reading from
+  // the right point of the file
+  disp += (my_rank / ncols) * width * local_height + (my_rank % ncols) * local_width;
+
+  etype = MPI_CHAR;                                     /* sets the etype to MPI_CHAR       */
+  MPI_Type_contiguous(local_width, etype, &contig);     /*                                  */
+  extent = width * sizeof(char);                        /* total size of repeatable unit    */
+  MPI_Type_create_resized(contig, 0, extent, &filetype); 
+  MPI_Type_commit(&filetype);                           /* makes the filetype derrived data */
+  // reads in the file
+  MPI_File_set_view(fh, disp, etype, filetype, "native", MPI_INFO_NULL);
+  MPI_File_write_all(fh, temp, local_width*local_height, MPI_CHAR, MPI_STATUS_IGNORE);
+  MPI_File_close(&fh);
+}
+// -----------------------------------------------------------------
+
+
+// -----------------------------------------------------------------
 // counts the number of bugs
 void measure (int iteration) {
   int local_sum = 0;
   int global_sum = 0;
 
+  int *pointer = (iteration%2==0)?field_a:field_b;
+
   for (int j = 0; j < local_height; j++) {
     for (int i = 0; i < local_width; i++) {
-      local_sum += (iteration%2==0) ? (field_a[(j+1)*(field_width)+(i+1)]) : (field_b[(j+1)*(field_width)+(i+1)]);
+      local_sum += pointer[(j+1)*(field_width)+(i+1)];
     }
   }
   
@@ -228,69 +281,61 @@ void summonspectre(int iteration) {
 int main(int argc, char *argv[]) {
   char in_file[1000];
   char partition[100];
-  int iterations, interval, neighbor;
+  int iterations, m_interval, w_interval, neighbor, offset;
 
   MPI_Init(&argc, &argv);                               /* start up MPI                         */
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);               /* get the number of processes          */
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);              /* get my rank among all the processes  */
 
-  if (argc < 5) {                                       /* parses command line arguments        */
+  if (argc < 6) {                                       /* parses command line arguments        */
     cleanup(my_rank, "Error:  Too few arguments");
   }
-  else if (argc == 5) {
+  else if (argc == 6) {
     strcpy(in_file,   argv[1]);
     strcpy(partition, argv[2]);
     if (!((strcmp(partition, "slice") == 0) || (strcmp(partition, "checkerboard") == 0) || (strcmp(partition, "none") == 0))) {
       cleanup(my_rank, "Error:  Incorrect partition option.  Enter 'slice', 'checkerboard', or 'none'");
     }
     iterations = atoi(argv[3]);
-    interval   = atoi(argv[4]);
+    m_interval = atoi(argv[4]);
+    w_interval = atoi(argv[5]);
   }
-  else if (argc > 5) {
+  else if (argc > 6) {
     cleanup(my_rank, "Error:  Too many arguments");
   }
 
-  fileread(in_file, partition);                         /* function call to read the file in    */
+  fileread(in_file, partition, &offset);                /* function call to read the file in    */
 
   for (int i = 0; i < iterations; i++) {
     summonspectre(i);                                   /* exchanges ghost fields               */
-    if (i%interval == 0) {measure(i);}
+    if (m_interval > 0) {
+      if (i%m_interval == 0) {measure(i);}
+    }
+    if (w_interval > 0) {
+      if (i%w_interval == 0) {filewrite(in_file, i, offset);}
+    }
+
+    int *pointer_old = (i%2==0)?field_a:field_b;        /* pointer to the field that is current */
+    int *pointer_new = (i%2==0)?field_b:field_a;        /* pointer to the field that will update*/
+
     for (int y = 0; y < local_height; y++) {            /* loops through the local data         */
       for (int x = 0; x < local_width; x++) {
         int yb = y+1;                                   /* shifts needed becuase the            */
         int xb = x+1;                                   /*   is bigger due to ghost rows        */
         neighbor = 0;                                   /* initialize the neighbor count        */
-        if (i%2 == 0) {                                 /* update field_a                       */
-          neighbor += field_a[(yb-1)*field_width+xb+1]; /* LOOK into using some type of pointer */
-          neighbor += field_a[(yb-1)*field_width+xb];   /*   to clean this up                   */
-          neighbor += field_a[(yb-1)*field_width+xb-1];
-          neighbor += field_a[(yb)*field_width+xb+1];
-          neighbor += field_a[(yb)*field_width+xb-1];
-          neighbor += field_a[(yb+1)*field_width+xb+1];
-          neighbor += field_a[(yb+1)*field_width+xb];
-          neighbor += field_a[(yb+1)*field_width+xb-1];
-
-          field_b[yb*field_width+xb]=field_a[yb*field_width+xb];
-
-          if ((((neighbor < 2) || (neighbor > 3)) && (field_a[yb*field_width+xb])) || ((neighbor == 3) && (!field_a[yb*field_width+xb]))) {
-            field_b[yb*field_width+xb] ^= 1;
-          }
-        }
-        else {                                          /* update field_b                       */
-          neighbor += field_b[(yb-1)*field_width+xb+1];
-          neighbor += field_b[(yb-1)*field_width+xb];
-          neighbor += field_b[(yb-1)*field_width+xb-1];
-          neighbor += field_b[(yb)*field_width+xb+1];
-          neighbor += field_b[(yb)*field_width+xb-1];
-          neighbor += field_b[(yb+1)*field_width+xb+1];
-          neighbor += field_b[(yb+1)*field_width+xb];
-          neighbor += field_b[(yb+1)*field_width+xb-1];
-
-          field_a[yb*field_width+xb]=field_b[yb*field_width+xb];
-
-				  if ((((neighbor < 2) || (neighbor > 3)) && (field_b[yb*field_width+xb])) || ((neighbor == 3) && (!field_b[yb*field_width+xb]))) {
-            field_a[yb*field_width+xb] ^= 1;
-          }
+        neighbor += pointer_old[(yb-1)*field_width+xb+1]; 
+        neighbor += pointer_old[(yb-1)*field_width+xb]; 
+        neighbor += pointer_old[(yb-1)*field_width+xb-1];
+        neighbor += pointer_old[(yb)*field_width+xb+1];
+        neighbor += pointer_old[(yb)*field_width+xb-1];
+        neighbor += pointer_old[(yb+1)*field_width+xb+1];
+        neighbor += pointer_old[(yb+1)*field_width+xb];
+        neighbor += pointer_old[(yb+1)*field_width+xb-1];
+        // sets the new filed to the old field value
+        pointer_new[yb*field_width+xb]=pointer_old[yb*field_width+xb];
+        // determines if the value of the new field should change
+        if ((((neighbor < 2) || (neighbor > 3)) && (pointer_old[yb*field_width+xb])) || ((neighbor == 3) && (!pointer_old[yb*field_width+xb]))) {
+          pointer_new[yb*field_width+xb] ^= 1;
         }
       }
     }
