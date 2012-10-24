@@ -12,8 +12,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <mpi.h>
-#include <mpe.h>
+#include "mpi.h"
+#include "mpe.h"
 #include <string.h>
 #include <stdbool.h>
 
