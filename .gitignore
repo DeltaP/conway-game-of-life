@@ -2,8 +2,13 @@ CGL
 
 Out/*
 Figures/*
+Log/*
 
 *.dSYM
 *.aux
 *.ps
 *.pgm
+*.o
+
+Clog/*
+cgl
