@@ -203,11 +203,11 @@ void measure (int iteration) {
   if (my_rank == 0) printf("BUGCOUNT for iteration %i = %i \n", iteration, global_sum);
 }
 // -----------------------------------------------------------------
-
+// jijioasdlfk   couch!  for doing that.f
 
 // -----------------------------------------------------------------
 // swaps ghost rows
-void summonspectre(int iteration) {
+void summonspectre(int iteration, MPI_Request* send, MPI_Request* recv) {
   MPI_Datatype col;                                     /* makes col data type                    */
   MPI_Type_vector(field_height, 1, field_width, MPI_INT, &col);
   MPI_Type_commit(&col);
@@ -227,7 +227,6 @@ void summonspectre(int iteration) {
    *  |g|              *
    *                   *
    *********************/
-
   int *pointer = (iteration%2==0)?field_a:field_b;      /* switches between field_a and           */
                                                         /*   field_b                              */
   int *p_a = pointer;                                   /* pointers for communication             */
@@ -238,46 +237,41 @@ void summonspectre(int iteration) {
   int *p_f = pointer + field_width * local_height;
   int *p_g = pointer + field_width * (local_height + 1);
 
-  MPI_Request col_reqs[8];
-  /*MPI_Status  col_stats[8];*/
-  MPI_Request row_reqs[8];
-  /*MPI_Status  row_stats[8];*/
-  MPI_Status status[8];
+
 
   if ((my_rank%ncols)%2 == 1) {                         /* send left-right                        */
-    MPI_Irecv(p_a, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &col_reqs[0]);
-    MPI_Isend(p_b, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &col_reqs[1]);
+    MPI_Irecv(p_a, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &recv[0]);
+    MPI_Isend(p_b, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &send[0]);
     if (my_rank%ncols != ncols -1) {
-      MPI_Isend(p_c, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &col_reqs[2]);
-      MPI_Irecv(p_d, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &col_reqs[3]);
+      MPI_Isend(p_c, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &send[1]);
+      MPI_Irecv(p_d, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &recv[1]);
     }
   }
   else if (my_rank%ncols != ncols -1) {             
-    MPI_Isend(p_c, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &col_reqs[4]);
-    MPI_Irecv(p_d, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &col_reqs[5]);
+    MPI_Isend(p_c, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &send[2]);
+    MPI_Irecv(p_d, 1, col, my_rank+1, 0, MPI_COMM_WORLD, &recv[2]);
     if (my_rank%ncols != 0) {
-      MPI_Irecv(p_a, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &col_reqs[6]);
-      MPI_Isend(p_b, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &col_reqs[7]);
+      MPI_Irecv(p_a, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &recv[3]);
+      MPI_Isend(p_b, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &send[3]);
     }
   }
-  /*MPI_Waitall(8, col_reqs, col_stats);*/
+  MPI_Waitall(8, recv, MPI_STATUS_IGNORE);
   if ((my_rank/ncols)%2 == 1) {                         /*  send up-down                          */
-    MPI_Irecv(p_a, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &row_reqs[0]);
-    MPI_Isend(p_e, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &row_reqs[1]);
+    MPI_Irecv(p_a, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &recv[4]);
+    MPI_Isend(p_e, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &send[4]);
     if (my_rank/ncols != nrows - 1) {
-      MPI_Isend(p_f, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &row_reqs[2]);
-      MPI_Irecv(p_g, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &row_reqs[3]);
+      MPI_Isend(p_f, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &send[5]);
+      MPI_Irecv(p_g, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &recv[5]);
     }
   }
   else if (my_rank/ncols != nrows -1) {
-    MPI_Isend(p_f, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &row_reqs[4]);
-    MPI_Irecv(p_g, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &row_reqs[5]);
+    MPI_Isend(p_f, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &send[6]);
+    MPI_Irecv(p_g, 1, row, my_rank+ncols, 0, MPI_COMM_WORLD, &recv[6]);
     if (my_rank/ncols != 0) {
-      MPI_Irecv(p_a, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &row_reqs[6]);
-      MPI_Isend(p_e, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &row_reqs[7]);
+      MPI_Irecv(p_a, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &recv[7]);
+      MPI_Isend(p_e, 1, row, my_rank-ncols, 0, MPI_COMM_WORLD, &send[7]);
     }
   }
-  MPI_Waitall(8, row_reqs, status);
 }
 // -----------------------------------------------------------------
 
@@ -319,11 +313,16 @@ int main(int argc, char *argv[]) {
   char in_file[1000];
   char partition[100];
   int iterations, m_interval, w_interval, t_interval, offset, i;
+  MPI_Request send[8], recv[8];
 
   MPI_Init(&argc, &argv);                               /* start up MPI                           */
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);               /* get the number of processes            */
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);              /* get my rank among all the processes    */
 
+  for (i = 0; i < 8; i++) {
+    send[i] = MPI_REQUEST_NULL;
+    recv[i] = MPI_REQUEST_NULL;
+  }
 
   if (argc < 7) {                                       /* parses command line arguments          */
     cleanup(my_rank, "Error:  Too few arguments");
@@ -346,7 +345,7 @@ int main(int argc, char *argv[]) {
   fileread(in_file, partition, &offset);                /* function call to read the file in      */
 
   for (i = 0; i < iterations; i++) {
-    summonspectre(i);                                   /* exchanges ghost fields                 */
+    summonspectre(i, send, recv);                       /* exchanges ghost fields                 */
     if (m_interval > 0) {                               /* checks if the bugs should be counted   */
       if (i%m_interval == 0) {
         measure(i);
@@ -357,7 +356,10 @@ int main(int argc, char *argv[]) {
         filewrite(in_file, i, offset);
       }
     }
+
+    MPI_Waitall(8, recv, MPI_STATUS_IGNORE);
     update(i);                                          /* updates the game board                 */
+    MPI_Waitall(8, send, MPI_STATUS_IGNORE);
   }
   cleanup(my_rank, "Thank you for playing!");           /* closes the program                     */
   return 0;
