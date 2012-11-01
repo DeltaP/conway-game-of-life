@@ -355,7 +355,7 @@ int main(int argc, char *argv[]) {
     int *pointer_old = (i%2==0)?field_a:field_b;        /* pointer to the field that is current */
     int *pointer_new = (i%2==0)?field_b:field_a;        /* pointer to the field that will update*/
 
-    for (y = 0; y < local_height; y++) {            /* loops through the local data         */
+    for (y = 0; y < local_height; y++) {                /* loops through the local data         */
       for (x = 0; x < local_width; x++) {
         int yb = y+1;                                   /* shifts needed becuase the            */
         int xb = x+1;                                   /*   is bigger due to ghost rows        */

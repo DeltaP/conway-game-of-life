@@ -161,7 +161,7 @@ This could be because each process is writing to a single location of disk where
 This is purely speculation.
 It is worth noting that the order of overall timings were fastest to slowest checkerboard, single core, slice.
 A barrier to massive parallelization is if the communication time takes as about as long as the update time. 
-This can occur if to small of a local volume is used and eats away at the gains from going to more cores.
-It is only desirable to split the problem on more cores if the communication time is shorter than the update time.
+This can occur if too small of a local volume is used and eats away at the gains from going to more cores.
+It is only desirable to split the problem among more cores if the communication time is shorter than the update time.
 My main goal at this point is to find out what is ailing my slice partition and see if I can get any speed gains from the program as a whole.
 \end{document}
