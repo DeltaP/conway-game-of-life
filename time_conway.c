@@ -284,8 +284,8 @@ void update (int iteration){
   int *pointer_new = (iteration%2==0)?field_b:field_a;  /* pointer to the field that will update  */
   for (y = 0; y < local_height; y++) {                  /* loops through the local data           */
     for (x = 0; x < local_width; x++) {
-      yb = y+1;                                     /* shifts needed becuase the              */
-      xb = x+1;                                     /*   is bigger due to ghost rows          */
+      yb = y + 1;                                       /* shifts needed becuase the board        */
+      xb = x + 1;                                       /*   is bigger due to ghost rows          */
       neighbor = 0;                                     /* initialize the neighbor count          */
       neighbor += pointer_old[(yb-1)*field_width+xb+1]; 
       neighbor += pointer_old[(yb-1)*field_width+xb]; 
@@ -313,14 +313,15 @@ int main(int argc, char *argv[]) {
   char in_file[1000];
   char partition[100];
   int iterations, m_interval, w_interval, t_interval, offset, i;
+  double start, finish, loc_elapsed, elapsed;
   MPI_Request send[8], recv[8];
 
   MPI_Init(&argc, &argv);                               /* start up MPI                           */
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);               /* get the number of processes            */
   MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);              /* get my rank among all the processes    */
 
-  for (i = 0; i < 8; i++) {
-    send[i] = MPI_REQUEST_NULL;
+  for (i = 0; i < 8; i++) {                             /* initializes the send and recv Request  */
+    send[i] = MPI_REQUEST_NULL;                         /*  variables to NULL                     */
     recv[i] = MPI_REQUEST_NULL;
   }
 
@@ -344,6 +345,9 @@ int main(int argc, char *argv[]) {
 
   fileread(in_file, partition, &offset);                /* function call to read the file in      */
 
+
+  MPI_Barrier(MPI_COMM_WORLD);
+  start = MPI_Wtime();
   for (i = 0; i < iterations; i++) {
     summonspectre(i, send, recv);                       /* exchanges ghost fields                 */
     if (m_interval > 0) {                               /* checks if the bugs should be counted   */
@@ -351,15 +355,27 @@ int main(int argc, char *argv[]) {
         measure(i);
       }
     }
-    if (w_interval > 0) {                               /* checks if the board should be written  */
+    if ((w_interval > 0) && (i > 0)) {                  /* checks if the board should be written  */
       if (i%w_interval == 0) {
         filewrite(in_file, i, offset);
+      }
+    }
+
+    if ((t_interval > 0) && (i > 0)) {                  /* measures the elapsed time              */
+      if (i%t_interval == 0) {
+        finish = MPI_Wtime();
+        loc_elapsed = finish-start;
+        MPI_Reduce(&loc_elapsed, &elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+        if (my_rank == 0) printf("Elapsed time = %e\n", elapsed);
+        MPI_Barrier(MPI_COMM_WORLD);
+        start = MPI_Wtime();
       }
     }
 
     MPI_Waitall(8, recv, MPI_STATUS_IGNORE);
     update(i);                                          /* updates the game board                 */
     MPI_Waitall(8, send, MPI_STATUS_IGNORE);
+
   }
   cleanup(my_rank, "Thank you for playing!");           /* closes the program                     */
   return 0;
