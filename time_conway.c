@@ -5,7 +5,7 @@
  * This is the copy for timing tests
  *
  * To compile:  mpicc -g -Wall -std=c99 -o CGL time_conway.c
- * To run:  mpiexec -n 1 ./CGL <input file name> <partition> <iteration> <m_interval> <w_interval> <t_interval>
+ * To run:  mpiexec -n 1 ./CGL <input file name> <partition> <outer iteration> <timing iteration> 
  *          <> -> mandatory
  *          [] -> optional
  */
@@ -216,6 +216,8 @@ void summonspectre(int iteration, MPI_Request* send, MPI_Request* recv) {
   MPI_Type_vector(field_width, 1, 1, MPI_INT, &row);
   MPI_Type_commit(&row);
 
+  int *pointer = (iteration%2==0)?field_a:field_b;      /* switches between field_a and field_b   */
+
   /* POINTER LOCATIONS *
    *                   *
    *  |a|b| ... |c|d|  *
@@ -227,8 +229,7 @@ void summonspectre(int iteration, MPI_Request* send, MPI_Request* recv) {
    *  |g|              *
    *                   *
    *********************/
-  int *pointer = (iteration%2==0)?field_a:field_b;      /* switches between field_a and           */
-                                                        /*   field_b                              */
+
   int *p_a = pointer;                                   /* pointers for communication             */
   int *p_b = pointer + 1;
   int *p_c = pointer + local_width;
@@ -236,8 +237,6 @@ void summonspectre(int iteration, MPI_Request* send, MPI_Request* recv) {
   int *p_e = pointer + field_width;
   int *p_f = pointer + field_width * local_height;
   int *p_g = pointer + field_width * (local_height + 1);
-
-
 
   if ((my_rank%ncols)%2 == 1) {                         /* send left-right                        */
     MPI_Irecv(p_a, 1, col, my_rank-1, 0, MPI_COMM_WORLD, &recv[0]);
@@ -312,7 +311,7 @@ void update (int iteration){
 int main(int argc, char *argv[]) {
   char in_file[1000];
   char partition[100];
-  int iterations, m_interval, w_interval, t_interval, offset, i;
+  int o_iterations, t_iterations, offset, i, j, iter;
   double start, finish, loc_elapsed, elapsed;
   MPI_Request send[8], recv[8];
 
@@ -325,57 +324,40 @@ int main(int argc, char *argv[]) {
     recv[i] = MPI_REQUEST_NULL;
   }
 
-  if (argc < 7) {                                       /* parses command line arguments          */
+  if (argc < 5) {                                       /* parses command line arguments          */
     cleanup(my_rank, "Error:  Too few arguments");
   }
-  else if (argc == 7) {
+  else if (argc == 5) {
     strcpy(in_file,   argv[1]);
     strcpy(partition, argv[2]);
     if (!((strcmp(partition, "slice") == 0) || (strcmp(partition, "checkerboard") == 0) || (strcmp(partition, "none") == 0))) {
       cleanup(my_rank, "Error:  Incorrect partition option.  Enter 'slice', 'checkerboard', or 'none'");
     }
-    iterations = atoi(argv[3]);
-    m_interval = atoi(argv[4]);
-    w_interval = atoi(argv[5]);
-    t_interval = atoi(argv[6]);
+    o_iterations = atoi(argv[3]);
+    t_iterations = atoi(argv[4]);
   }
-  else if (argc > 7) {
+  else if (argc > 5) {
     cleanup(my_rank, "Error:  Too many arguments");
   }
 
   fileread(in_file, partition, &offset);                /* function call to read the file in      */
 
-
-  MPI_Barrier(MPI_COMM_WORLD);
-  start = MPI_Wtime();
-  for (i = 0; i < iterations; i++) {
-    summonspectre(i, send, recv);                       /* exchanges ghost fields                 */
-    if (m_interval > 0) {                               /* checks if the bugs should be counted   */
-      if (i%m_interval == 0) {
-        measure(i);
-      }
+  for (i = 0; i < o_iterations; i++) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    start = MPI_Wtime();
+    for (j = 0; j < t_iterations; j++) {
+      iter = (i + 1) * j;
+      summonspectre(iter, send, recv);                  /* exchanges ghost fields                 */
+      MPI_Waitall(8, recv, MPI_STATUS_IGNORE);          /* waits on sends                         */
+      update(iter);                                     /* updates the game board                 */
+      MPI_Waitall(8, send, MPI_STATUS_IGNORE);          /* waits on receives                      */
     }
-    if ((w_interval > 0) && (i > 0)) {                  /* checks if the board should be written  */
-      if (i%w_interval == 0) {
-        filewrite(in_file, i, offset);
-      }
-    }
-
-    if ((t_interval > 0) && (i > 0)) {                  /* measures the elapsed time              */
-      if (i%t_interval == 0) {
-        finish = MPI_Wtime();
-        loc_elapsed = finish-start;
-        MPI_Reduce(&loc_elapsed, &elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-        if (my_rank == 0) printf("Elapsed time = %e\n", elapsed);
-        MPI_Barrier(MPI_COMM_WORLD);
-        start = MPI_Wtime();
-      }
-    }
-
-    MPI_Waitall(8, recv, MPI_STATUS_IGNORE);
-    update(i);                                          /* updates the game board                 */
-    MPI_Waitall(8, send, MPI_STATUS_IGNORE);
-
+    finish = MPI_Wtime();
+    loc_elapsed = finish-start;
+    MPI_Reduce(&loc_elapsed, &elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+    if (my_rank == 0) printf("Elapsed time = %e\n", elapsed);
+    MPI_Barrier(MPI_COMM_WORLD);
+    start = MPI_Wtime();
   }
   cleanup(my_rank, "Thank you for playing!");           /* closes the program                     */
   return 0;
